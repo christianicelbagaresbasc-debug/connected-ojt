@@ -5,13 +5,13 @@ import { requireRole } from "@/lib/auth";
 import { recommend } from "@/lib/matching";
 import { phDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
-import { markNotificationsReadAction, addSkillAction, approveStudentAction, applyOpportunityAction, assignStudentAction, confirmPlacementAction, createCompanyAction, createOpportunityAction, deactivateUserAction, removeSkillAction, reviewApplicationAction, reviewDocumentAction, saveCompanyProfileAction, saveStudentProfileAction, studentApplicationAction, suggestCompanyAction, uploadDocumentAction, verifyCompanyAction } from "@/app/actions";
+import { markNotificationsReadAction, addSkillAction, approveStudentAction, applyOpportunityAction, assignStudentAction, confirmPlacementAction, createCompanyAction, createOpportunityAction, deactivateUserAction, removeSkillAction, reviewApplicationAction, reviewDocumentAction, saveCompanyProfileAction, saveStudentProfileAction, studentApplicationAction, suggestCompanyAction, updatePlacementAction, uploadDocumentAction, verifyCompanyAction } from "@/app/actions";
 import { canAccessStudent } from "@/lib/auth";
 import { CreateUserForm } from "@/components/CreateUserForm";
 import type { Role } from "@/lib/workflow";
 
 const scopes: Record<string, Role> = { coordinator: "COORDINATOR", "co-coordinator": "CO_COORDINATOR", student: "STUDENT", company: "COMPANY", attorney: "ATTORNEY" };
-const titles: Record<string, string> = { notifications: "Notifications", students: "Students", companies: "Companies", opportunities: "Opportunities", applications: "Applications", placements: "Placements", users: "Users", skills: "Skills", reports: "Reports", audit: "Audit log", profile: "My profile", "suggest-company": "Suggest a company", applicants: "Applicants", history: "Review history", documents: "Document review" };
+const titles: Record<string, string> = { notifications: "Notifications", students: "Students", companies: "Companies", opportunities: "Opportunities", applications: "Applications", placements: "Placements", placement: "My placement", users: "Users", skills: "Skills", reports: "Reports", audit: "Audit log", profile: "My profile", "suggest-company": "Suggest a company", applicants: "Applicants", history: "Review history", documents: "Document review" };
 function Table({ headers, rows, empty }: { headers: string[]; rows: React.ReactNode[][]; empty: string }) {
   if (!rows.length) return <p className="empty">{empty}</p>;
   return <div className="panel" style={{ overflowX: "auto" }}><table><thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>;
@@ -34,6 +34,7 @@ export default async function WorkspacePage({ params }: { params: Promise<{ scop
   if (section === "suggest-company" && role === "STUDENT") return <SuggestCompanyPage />;
   if (section === "profile" && role === "COMPANY") return <CompanyProfilePage userId={user.id} />;
   if (section === "profile" && role === "STUDENT") return <StudentProfilePage userId={user.id} />;
+  if (section === "placement" && role === "STUDENT") return <StudentPlacementPage userId={user.id} />;
 
   if (role === "COMPANY" && section !== "notifications" && user.companyId) {
     const company = await db.company.findUnique({ where: { id: user.companyId }, select: { name: true, verification: true } });
@@ -106,6 +107,13 @@ async function StudentProfilePage({ userId }: { userId: string }) {
   const student = await db.studentProfile.findUnique({ where: { userId }, include: { skills: { include: { skill: true } } } });
   if (!student) notFound();
   return <><h1>My profile</h1><p className="subtle">Student number: {student.studentNumber} · Approval: <StatusBadge value={student.approval} /></p><form action={saveStudentProfileAction} className="panel stack"><label>Headline<input name="headline" maxLength={160} defaultValue={student.headline || ""} /></label><label>About<textarea name="about" rows={5} maxLength={2000} defaultValue={student.about || ""} /></label><label>Phone<input name="phone" maxLength={40} defaultValue={student.phone || ""} /></label><label>Location<input name="location" maxLength={160} defaultValue={student.location || ""} /></label><label>Portfolio URL<input type="url" name="portfolioUrl" maxLength={500} defaultValue={student.portfolioUrl || ""} /></label><button>Save profile</button></form></>;
+}
+
+async function StudentPlacementPage({ userId }: { userId: string }) {
+  const student = await db.studentProfile.findUnique({ where: { userId }, include: { applications: { where: { status: { in: ["ACCEPTED", "PLACED"] } }, include: { opportunity: { include: { company: true } } }, orderBy: { updatedAt: "desc" } }, placements: { include: { company: true, opportunity: true, documents: { select: { id: true, kind: true, fileName: true, legalStatus: true, createdAt: true } } }, orderBy: { createdAt: "desc" } } } });
+  if (!student) notFound();
+  const active = student.placements.find((placement) => placement.status === "ACTIVE");
+  return <><h1>My placement</h1>{active ? <><div className="panel"><h2>{active.company.name}</h2><p><strong>Opportunity:</strong> {active.opportunity?.title || "Manual placement"}</p><p><strong>Status:</strong> <StatusBadge value={active.status} /></p><p><strong>Start date:</strong> {phDate(active.startDate)}</p><p><strong>End date:</strong> {phDate(active.endDate)}</p></div><div className="panel"><h2>Submit a weekly report</h2><form action={uploadDocumentAction} className="stack"><input type="hidden" name="placementId" value={active.id} /><input type="hidden" name="kind" value="WEEKLY_REPORT" /><label>Report file (PDF, PNG, JPEG, or DOCX)<input required type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.docx" /></label><label>Summary<textarea name="note" rows={3} maxLength={2000} /></label><button>Upload weekly report</button></form></div><section className="panel"><h2>Placement documents</h2>{active.documents.length ? active.documents.map((doc) => <p key={doc.id}><Link href={`/api/documents/${doc.id}`}>{doc.fileName}</Link> · {doc.kind.replaceAll("_", " ")} · <StatusBadge value={doc.legalStatus} /> · {phDate(doc.createdAt)}</p>) : <p className="empty">No placement documents yet.</p>}</section></> : <div className="panel"><h2>No active placement yet</h2><p>Offers and placement decisions appear here after review.</p>{student.applications.length ? student.applications.map((app) => <p key={app.id}><Link href={`/student/applications/${app.id}`}>{app.opportunity.title}</Link> · {app.opportunity.company.name} · <StatusBadge value={app.status} /></p>) : <p className="empty">You do not have an accepted offer yet.</p>}</div>}{student.placements.filter((placement) => placement.status !== "ACTIVE").map((placement) => <div className="panel" key={placement.id}>{placement.company.name} · <StatusBadge value={placement.status} /> · {phDate(placement.endDate)}</div>)}</>;
 }
 
 async function CreateOpportunityPage() {
@@ -183,7 +191,7 @@ async function GenericList({ role, userId, section, heading }: { role: Role; use
   if (section === "placements" && role !== "ATTORNEY") {
     const where = role === "STUDENT" ? { student: { userId } } : role === "CO_COORDINATOR" ? { student: { assignedToId: userId } } : role === "COMPANY" ? { company: { reps: { some: { id: userId } } } } : {};
     const rows = await db.placement.findMany({ where, include: { student: { include: { user: true } }, company: true }, orderBy: { createdAt: "desc" }, take: 100 });
-    return <><h1>{heading}</h1><p className="subtle">Placement records require coordinator confirmation.</p><Table headers={["Student", "Company", "Status", "Start date"]} rows={rows.map((p) => [p.student.user.name, p.company.name, <StatusBadge value={p.status} />, phDate(p.startDate)])} empty="No placement records yet." /></>;
+    return <><h1>{heading}</h1><p className="subtle">Placement records require coordinator confirmation.</p><Table headers={["Student", "Company", "Status", "Start date", "Update"]} rows={rows.map((p) => [p.student.user.name, p.company.name, <StatusBadge value={p.status} />, phDate(p.startDate), (role === "COORDINATOR" || role === "CO_COORDINATOR") && p.status === "ACTIVE" ? <form action={updatePlacementAction} className="stack"><input type="hidden" name="placementId" value={p.id} /><label>Decision<select name="status"><option value="COMPLETED">Mark completed</option><option value="CANCELLED">Cancel</option></select></label><label>Reason<textarea required name="reason" rows={2} maxLength={2000} /></label><button className="secondary">Save</button></form> : "—"])} empty="No placement records yet." /></>;
   }
   if (section === "history" && role === "ATTORNEY") {
     const rows = await db.documentReview.findMany({ where: { reviewerId: userId }, include: { document: { select: { fileName: true, kind: true } } }, orderBy: { createdAt: "desc" }, take: 100 });

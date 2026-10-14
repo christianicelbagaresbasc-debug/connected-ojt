@@ -276,7 +276,7 @@ export async function reviewDocumentAction(form: FormData) {
 
 export async function uploadDocumentAction(form: FormData) {
   const actor = await requireRole("COORDINATOR", "CO_COORDINATOR", "STUDENT", "COMPANY");
-  const input = z.object({ kind: z.enum(["MOA", "SEC_REGISTRATION", "DTI_REGISTRATION", "BUSINESS_CERTIFICATE", "INTERNSHIP_CONTRACT", "COMPLETION_CERTIFICATE", "ACCOMPLISHMENT_REPORT", "WEEKLY_REPORT", "RESUME", "CERTIFICATION", "OTHER"]), applicationId: z.string().trim().max(100).optional(), note: z.string().trim().max(2000).optional() }).safeParse({ kind: form.get("kind"), applicationId: form.get("applicationId") || undefined, note: form.get("note") || undefined });
+  const input = z.object({ kind: z.enum(["MOA", "SEC_REGISTRATION", "DTI_REGISTRATION", "BUSINESS_CERTIFICATE", "INTERNSHIP_CONTRACT", "COMPLETION_CERTIFICATE", "ACCOMPLISHMENT_REPORT", "WEEKLY_REPORT", "RESUME", "CERTIFICATION", "OTHER"]), applicationId: z.string().trim().max(100).optional(), placementId: z.string().trim().max(100).optional(), note: z.string().trim().max(2000).optional() }).safeParse({ kind: form.get("kind"), applicationId: form.get("applicationId") || undefined, placementId: form.get("placementId") || undefined, note: form.get("note") || undefined });
   const file = form.get("file");
   if (!input.success || !(file instanceof File)) return;
   const checked = await validateUploadBytes(file);
@@ -299,11 +299,31 @@ export async function uploadDocumentAction(form: FormData) {
     studentId = app.studentId;
     companyId = app.opportunity.companyId;
   }
+  let placementId: string | null = null;
+  if (input.data.placementId) {
+    const placement = await db.placement.findUnique({ where: { id: input.data.placementId }, select: { id: true, studentId: true, companyId: true } });
+    if (!placement || actor.role === "STUDENT" && placement.studentId !== studentId || actor.role === "COMPANY" && placement.companyId !== companyId || actor.role === "CO_COORDINATOR" && !(await canAccessStudent(actor as CurrentUser, placement.studentId))) return;
+    placementId = placement.id;
+    studentId = placement.studentId;
+    companyId = placement.companyId;
+  }
   const requiresLegal = ["MOA", "INTERNSHIP_CONTRACT", "SEC_REGISTRATION", "DTI_REGISTRATION", "BUSINESS_CERTIFICATE"].includes(input.data.kind);
-  const doc = await db.document.create({ data: { kind: input.data.kind, fileName: file.name.slice(0, 255), mimeType: file.type, size: checked.bytes.length, data: checked.bytes, note: input.data.note || null, uploadedById: actor.id, studentId, companyId, applicationId, legalStatus: requiresLegal ? "PENDING_REVIEW" : "NOT_REQUIRED" } });
+  const doc = await db.document.create({ data: { kind: input.data.kind, fileName: file.name.slice(0, 255), mimeType: file.type, size: checked.bytes.length, data: checked.bytes, note: input.data.note || null, uploadedById: actor.id, studentId, companyId, applicationId, placementId, legalStatus: requiresLegal ? "PENDING_REVIEW" : "NOT_REQUIRED" } });
   await audit(actor.id, "DOCUMENT_UPLOADED", "Document", doc.id, input.data.kind);
   if (requiresLegal) await notifyRole("ATTORNEY", `A ${input.data.kind.replaceAll("_", " ")} document is ready for legal review.`, `/attorney/documents/${doc.id}`);
   revalidateWorkspaces("/student/placement", "/student/applications", "/company/applicants", "/coordinator/companies", "/attorney");
+}
+
+export async function updatePlacementAction(form: FormData) {
+  const actor = await requireRole("COORDINATOR", "CO_COORDINATOR");
+  const input = z.object({ placementId: idSchema, status: z.enum(["COMPLETED", "CANCELLED"]), reason: z.string().trim().min(3).max(2000) }).safeParse({ placementId: form.get("placementId"), status: form.get("status"), reason: form.get("reason") });
+  if (!input.success) return;
+  const placement = await db.placement.findUnique({ where: { id: input.data.placementId }, include: { student: { select: { userId: true } } } });
+  if (!placement || placement.status !== "ACTIVE" || actor.role === "CO_COORDINATOR" && !(await canAccessStudent(actor as CurrentUser, placement.studentId))) return;
+  await db.placement.update({ where: { id: placement.id }, data: { status: input.data.status, endDate: input.data.status === "COMPLETED" ? new Date() : null, overrideReason: input.data.reason } });
+  await audit(actor.id, `PLACEMENT_${input.data.status}`, "Placement", placement.id, input.data.reason);
+  await notify(placement.student.userId, `Your placement was marked ${input.data.status.toLowerCase()}.`, "/student/placement");
+  revalidateWorkspaces("/coordinator/placements", "/co-coordinator/placements", "/student/placement");
 }
 
 export async function confirmPlacementAction(form: FormData) {
