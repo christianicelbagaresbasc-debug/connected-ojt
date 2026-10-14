@@ -5,8 +5,9 @@ import { requireRole } from "@/lib/auth";
 import { recommend } from "@/lib/matching";
 import { phDate } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
-import { markNotificationsReadAction, approveStudentAction, applyOpportunityAction, assignStudentAction, confirmPlacementAction, createOpportunityAction, reviewApplicationAction, reviewDocumentAction, saveStudentProfileAction, studentApplicationAction, uploadDocumentAction, verifyCompanyAction } from "@/app/actions";
+import { markNotificationsReadAction, addSkillAction, approveStudentAction, applyOpportunityAction, assignStudentAction, confirmPlacementAction, createCompanyAction, createOpportunityAction, deactivateUserAction, removeSkillAction, reviewApplicationAction, reviewDocumentAction, saveCompanyProfileAction, saveStudentProfileAction, studentApplicationAction, suggestCompanyAction, uploadDocumentAction, verifyCompanyAction } from "@/app/actions";
 import { canAccessStudent } from "@/lib/auth";
+import { CreateUserForm } from "@/components/CreateUserForm";
 import type { Role } from "@/lib/workflow";
 
 const scopes: Record<string, Role> = { coordinator: "COORDINATOR", "co-coordinator": "CO_COORDINATOR", student: "STUDENT", company: "COMPANY", attorney: "ATTORNEY" };
@@ -27,8 +28,11 @@ export default async function WorkspacePage({ params }: { params: Promise<{ scop
   if (section === "opportunities" && segments[1] === "new" && role === "COMPANY") return <CreateOpportunityPage />;
   if (section === "opportunities" && segments[1]) return <OpportunityDetail role={role} userId={user.id} opportunityId={segments[1]} />;
   if (section === "students" && segments[1] && role === "COORDINATOR") return <StudentAdminDetail studentId={segments[1]} />;
+  if (section === "companies" && segments[1] === "new" && role === "COORDINATOR") return <CreateCompanyPage />;
   if (section === "companies" && segments[1] && role === "COORDINATOR") return <CompanyAdminDetail companyId={segments[1]} />;
   if (section === "documents" && segments[1] && role === "ATTORNEY") return <AttorneyDocumentDetail documentId={segments[1]} />;
+  if (section === "suggest-company" && role === "STUDENT") return <SuggestCompanyPage />;
+  if (section === "profile" && role === "COMPANY") return <CompanyProfilePage userId={user.id} />;
   if (section === "profile" && role === "STUDENT") return <StudentProfilePage userId={user.id} />;
 
   if (role === "COMPANY" && section !== "notifications" && user.companyId) {
@@ -109,6 +113,23 @@ async function CreateOpportunityPage() {
   return <><p><Link href="/company/opportunities">← Opportunities</Link></p><h1>Post an opportunity</h1><p className="subtle">Only university-verified companies can publish opportunities. Provide clear duties and qualifications.</p><form action={createOpportunityAction} className="panel stack"><label>Title<input required name="title" maxLength={160} /></label><label>Description<textarea required name="description" rows={5} maxLength={5000} /></label><label>Tasks<textarea name="tasks" rows={3} maxLength={3000} /></label><label>Qualifications<textarea name="qualifications" rows={3} maxLength={3000} /></label><label>Number of slots<input required type="number" name="slots" min={1} max={100} defaultValue={1} /></label><label>Location<input name="location" maxLength={200} /></label><label>Work arrangement<select name="workArrangement"><option value="ON_SITE">On site</option><option value="HYBRID">Hybrid</option><option value="REMOTE">Remote</option></select></label><label>Application deadline<input type="date" name="deadline" /></label><button>Publish opportunity</button></form></>;
 }
 
+async function CreateCompanyPage() {
+  await requireRole("COORDINATOR");
+  return <><p><Link href="/coordinator/companies">← Companies</Link></p><h1>Create a company record</h1><p className="subtle">New records begin pending and cannot publish opportunities until verified.</p><form action={createCompanyAction} className="panel stack"><label>Company name<input required name="name" maxLength={200} /></label><label>Industry<input name="industry" maxLength={160} /></label><label>Address<input name="address" maxLength={300} /></label><label>Contact person<input name="contactPerson" maxLength={160} /></label><label>Contact email<input type="email" name="contactEmail" maxLength={254} /></label><label>Contact phone<input name="contactPhone" maxLength={50} /></label><label>Description<textarea name="description" rows={4} maxLength={3000} /></label><button>Create record</button></form></>;
+}
+
+async function SuggestCompanyPage() {
+  await requireRole("STUDENT");
+  return <><h1>Suggest a company</h1><p className="subtle">The university will review the company before students can apply to its opportunities.</p><form action={suggestCompanyAction} className="panel stack"><label>Company name<input required name="name" maxLength={200} /></label><label>Industry<input name="industry" maxLength={160} /></label><label>Address<input name="address" maxLength={300} /></label><label>Contact email<input type="email" name="contactEmail" maxLength={254} /></label><label>What do you know about this company?<textarea name="description" rows={4} maxLength={3000} /></label><button>Send suggestion</button></form></>;
+}
+
+async function CompanyProfilePage({ userId }: { userId: string }) {
+  const user = await db.user.findUnique({ where: { id: userId }, select: { company: true } });
+  if (!user?.company) return <><h1>Company profile</h1><p className="empty">No company record is linked to this account.</p></>;
+  const company = user.company;
+  return <><h1>Company profile</h1><div className="panel"><p><strong>Company:</strong> {company.name}</p><p><strong>Partner type:</strong> {company.partnerType.replaceAll("_", " ")}</p><p><strong>Verification:</strong> <StatusBadge value={company.verification} /></p><p><strong>University notes:</strong> {company.verificationNotes || "—"}</p></div><form action={saveCompanyProfileAction} className="panel stack"><h2>Contact details</h2><label>Contact person<input name="contactPerson" maxLength={160} defaultValue={company.contactPerson || ""} /></label><label>Contact email<input type="email" name="contactEmail" maxLength={254} defaultValue={company.contactEmail || ""} /></label><label>Contact phone<input name="contactPhone" maxLength={50} defaultValue={company.contactPhone || ""} /></label><label>Website<input type="url" name="website" maxLength={500} defaultValue={company.website || ""} /></label><label>Description<textarea name="description" rows={4} maxLength={3000} defaultValue={company.description || ""} /></label><button>Save profile</button></form></>;
+}
+
 async function StudentDashboard({ userId }: { userId: string }) {
   const student = await db.studentProfile.findUnique({ where: { userId }, include: { skills: { include: { skill: true } }, applications: true, placements: { where: { status: "ACTIVE" }, include: { company: true } } } });
   if (!student) return <><h1>Student dashboard</h1><p className="empty">Your student profile is not set up yet.</p></>;
@@ -147,7 +168,7 @@ async function GenericList({ role, userId, section, heading }: { role: Role; use
   }
   if (section === "companies" && role !== "ATTORNEY") {
     const rows = await db.company.findMany({ where: role === "STUDENT" ? { verification: "VERIFIED" } : {}, orderBy: { name: "asc" }, take: 100 });
-    return <><h1>{heading}</h1><p className="subtle">Verified companies are visible to students.</p><Table headers={["Company", "Industry", "Partner type", "Verification"]} rows={rows.map((c) => [c.name, c.industry ?? "—", c.partnerType.replaceAll("_", " "), <StatusBadge value={c.verification} />])} empty="No companies to show yet." /></>;
+    return <><h1>{heading}</h1><p className="subtle">Verified companies are visible to students.</p>{role === "COORDINATOR" && <p><Link className="button-link" href="/coordinator/companies/new">Create company record</Link></p>}<Table headers={["Company", "Industry", "Partner type", "Verification"]} rows={rows.map((c) => [role === "COORDINATOR" ? <Link href={`/coordinator/companies/${c.id}`}>{c.name}</Link> : c.name, c.industry ?? "—", c.partnerType.replaceAll("_", " "), <StatusBadge value={c.verification} />])} empty="No companies to show yet." /></>;
   }
   if (section === "opportunities" && ["STUDENT", "COMPANY", "COORDINATOR"].includes(role)) {
     const where = role === "STUDENT" ? { status: "OPEN" as const, company: { verification: "VERIFIED" as const } } : role === "COMPANY" ? { companyId: (await db.user.findUnique({ where: { id: userId }, select: { companyId: true } }))?.companyId ?? "" } : {};
@@ -167,6 +188,22 @@ async function GenericList({ role, userId, section, heading }: { role: Role; use
   if (section === "history" && role === "ATTORNEY") {
     const rows = await db.documentReview.findMany({ where: { reviewerId: userId }, include: { document: { select: { fileName: true, kind: true } } }, orderBy: { createdAt: "desc" }, take: 100 });
     return <><h1>{heading}</h1><Table headers={["Document", "Kind", "Decision", "Comment", "Date"]} rows={rows.map((r) => [r.document.fileName, r.document.kind, <StatusBadge value={r.action} />, r.comment ?? "—", phDate(r.createdAt)])} empty="No documents have been reviewed." /></>;
+  }
+  if (section === "users" && role === "COORDINATOR") {
+    const [users, companies] = await Promise.all([db.user.findMany({ where: { role: { not: "COORDINATOR" } }, include: { company: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 200 }), db.company.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })]);
+    return <><h1>{heading}</h1><section className="panel"><h2>Create a staff or company login</h2><p>A temporary password will be shown once after creation. The new user must change it at first login.</p><CreateUserForm companies={companies} /></section><section className="panel"><h2>Accounts</h2><Table headers={["Name", "Email", "Role", "Company", "Status", "Action"]} rows={users.map((account) => [account.name, account.email, account.role.replaceAll("_", " "), account.company?.name || "—", account.isActive ? "Active" : "Inactive", account.isActive ? <form action={deactivateUserAction}><input type="hidden" name="userId" value={account.id} /><label className="check"><input required type="checkbox" name="confirm" value="yes" /> Confirm deactivate</label><button className="secondary">Deactivate</button></form> : "—"])} empty="No staff or company accounts yet." /></section></>;
+  }
+  if (section === "skills" && role === "COORDINATOR") {
+    const skills = await db.skill.findMany({ orderBy: [{ category: "asc" }, { name: "asc" }] });
+    return <><h1>{heading}</h1><form action={addSkillAction} className="panel stack"><h2>Add a skill</h2><label>Skill name<input required name="name" maxLength={100} /></label><label>Category<input name="category" maxLength={100} /></label><button>Add skill</button></form><section className="panel"><h2>Catalog ({skills.length})</h2>{skills.map((skill) => <form key={skill.id} action={removeSkillAction} className="inline-form"><input type="hidden" name="skillId" value={skill.id} /><span>{skill.name} · {skill.category || "Uncategorized"}</span><label className="check"><input required type="checkbox" name="confirm" value="yes" /> Confirm remove</label><button className="secondary">Remove</button></form>)}</section></>;
+  }
+  if (section === "audit" && role === "COORDINATOR") {
+    const entries = await db.auditLog.findMany({ include: { actor: { select: { name: true, email: true } } }, orderBy: { createdAt: "desc" }, take: 200 });
+    return <><h1>{heading}</h1><Table headers={["When", "Actor", "Action", "Record", "Detail"]} rows={entries.map((entry) => [phDate(entry.createdAt), entry.actor?.name || "System", entry.action, `${entry.entity}${entry.entityId ? ` · ${entry.entityId}` : ""}`, entry.detail || "—"])} empty="No audit entries yet." /></>;
+  }
+  if (section === "reports" && role === "COORDINATOR") {
+    const [students, pendingStudents, companies, verifiedCompanies, opportunities, applications, placements] = await Promise.all([db.studentProfile.count(), db.studentProfile.count({ where: { approval: "PENDING" } }), db.company.count(), db.company.count({ where: { verification: "VERIFIED" } }), db.opportunity.count(), db.application.count(), db.placement.count({ where: { status: "ACTIVE" } })]);
+    return <><h1>{heading}</h1><div className="grid"><Metric label="Students" value={students} /><Metric label="Pending student approvals" value={pendingStudents} /><Metric label="Companies" value={companies} /><Metric label="Verified companies" value={verifiedCompanies} /><Metric label="Opportunities" value={opportunities} /><Metric label="Applications" value={applications} /><Metric label="Active placements" value={placements} /></div><p><Link className="button-link" href="/api/reports" prefetch={false}>Download CSV report</Link></p></>;
   }
   return <><h1>{heading}</h1><p className="empty">This section is ready for your records. No records are available yet.</p></>;
 }

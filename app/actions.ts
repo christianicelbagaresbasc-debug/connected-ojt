@@ -11,6 +11,7 @@ import { canConfirmPlacement, canTransition, canTransitionVerification } from "@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { validateUploadBytes } from "@/lib/files";
+import { randomBytes } from "node:crypto";
 
 export type FormState = { error?: string; success?: string };
 export async function loginAction(_state: FormState, form: FormData): Promise<FormState> {
@@ -177,6 +178,88 @@ export async function createOpportunityAction(form: FormData) {
   await notifyRole("COORDINATOR", `A new opportunity was posted by a verified company.`, "/coordinator/opportunities");
   revalidateWorkspaces("/company/opportunities", "/company");
   redirect(`/company/opportunities/${opportunity.id}`);
+}
+
+export async function createCompanyAction(form: FormData) {
+  const actor = await requireRole("COORDINATOR");
+  const input = z.object({ name: z.string().trim().min(2).max(200), industry: z.string().trim().max(160), address: z.string().trim().max(300), contactPerson: z.string().trim().max(160), contactEmail: z.string().trim().email().max(254).or(z.literal("")), contactPhone: z.string().trim().max(50), description: z.string().trim().max(3000) }).safeParse({ name: form.get("name"), industry: form.get("industry"), address: form.get("address"), contactPerson: form.get("contactPerson"), contactEmail: form.get("contactEmail"), contactPhone: form.get("contactPhone"), description: form.get("description") });
+  if (!input.success) return;
+  const company = await db.company.create({ data: { ...input.data, contactEmail: input.data.contactEmail || null, industry: input.data.industry || null, address: input.data.address || null, contactPerson: input.data.contactPerson || null, contactPhone: input.data.contactPhone || null, description: input.data.description || null, partnerType: "NEW_COMPANY", verification: "PENDING" } });
+  await audit(actor.id, "COMPANY_CREATED", "Company", company.id);
+  revalidateWorkspaces("/coordinator/companies", "/coordinator");
+  redirect(`/coordinator/companies/${company.id}`);
+}
+
+export async function suggestCompanyAction(form: FormData) {
+  const actor = await requireRole("STUDENT");
+  const input = z.object({ name: z.string().trim().min(2).max(200), industry: z.string().trim().max(160), address: z.string().trim().max(300), contactEmail: z.string().trim().email().max(254).or(z.literal("")), description: z.string().trim().max(3000) }).safeParse({ name: form.get("name"), industry: form.get("industry"), address: form.get("address"), contactEmail: form.get("contactEmail"), description: form.get("description") });
+  if (!input.success) return;
+  const student = await db.studentProfile.findUnique({ where: { userId: actor.id }, select: { id: true } });
+  if (!student) return;
+  const company = await db.company.create({ data: { name: input.data.name, industry: input.data.industry || null, address: input.data.address || null, contactEmail: input.data.contactEmail || null, description: input.data.description || null, partnerType: "NEW_COMPANY", verification: "PENDING", suggestedById: student.id } });
+  await audit(actor.id, "COMPANY_SUGGESTED", "Company", company.id);
+  await notifyRole("COORDINATOR", "A student suggested a new company for verification.", `/coordinator/companies/${company.id}`);
+  revalidateWorkspaces("/student/suggest-company", "/coordinator/companies");
+}
+
+export async function saveCompanyProfileAction(form: FormData) {
+  const actor = await requireRole("COMPANY");
+  if (!actor.companyId) return;
+  const input = z.object({ contactPerson: z.string().trim().max(160), contactEmail: z.string().trim().email().max(254).or(z.literal("")), contactPhone: z.string().trim().max(50), website: z.string().trim().url().max(500).or(z.literal("")), description: z.string().trim().max(3000) }).safeParse({ contactPerson: form.get("contactPerson"), contactEmail: form.get("contactEmail"), contactPhone: form.get("contactPhone"), website: form.get("website"), description: form.get("description") });
+  if (!input.success) return;
+  await db.company.update({ where: { id: actor.companyId }, data: { contactPerson: input.data.contactPerson || null, contactEmail: input.data.contactEmail || null, contactPhone: input.data.contactPhone || null, website: input.data.website || null, description: input.data.description || null } });
+  await audit(actor.id, "COMPANY_PROFILE_UPDATED", "Company", actor.companyId);
+  revalidateWorkspaces("/company/profile", "/company");
+}
+
+export async function createUserAction(_state: FormState, form: FormData): Promise<FormState> {
+  const actor = await requireRole("COORDINATOR");
+  const input = z.object({ name: z.string().trim().min(2).max(100), email: z.string().trim().email().max(254), role: z.enum(["CO_COORDINATOR", "ATTORNEY", "COMPANY"]), companyId: z.string().trim().max(100).optional() }).safeParse({ name: form.get("name"), email: form.get("email"), role: form.get("role"), companyId: form.get("companyId") || undefined });
+  if (!input.success) return { error: "Check the name, email, and role." };
+  if (input.data.role === "COMPANY" && !input.data.companyId) return { error: "Choose a company for this representative." };
+  if (input.data.companyId && !(await db.company.findUnique({ where: { id: input.data.companyId }, select: { id: true } }))) return { error: "That company record was not found." };
+  const tempPassword = randomBytes(9).toString("base64url").slice(0, 12);
+  try {
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    const user = await db.user.create({ data: { name: input.data.name, email: input.data.email.toLowerCase(), role: input.data.role, companyId: input.data.role === "COMPANY" ? input.data.companyId : null, passwordHash, mustChangePassword: true } });
+    await audit(actor.id, "USER_CREATED", "User", user.id, input.data.role);
+    revalidateWorkspaces("/coordinator/users");
+    return { success: `Created ${user.email}. Temporary password: ${tempPassword}` };
+  } catch { return { error: "That email is already registered." }; }
+}
+
+export async function deactivateUserAction(form: FormData) {
+  const actor = await requireRole("COORDINATOR");
+  const input = z.object({ userId: idSchema, confirm: z.literal("yes") }).safeParse({ userId: form.get("userId"), confirm: form.get("confirm") });
+  if (!input.success || input.data.userId === actor.id) return;
+  const target = await db.user.findUnique({ where: { id: input.data.userId }, select: { id: true, email: true, role: true } });
+  if (!target || target.role === "COORDINATOR") return;
+  await db.user.update({ where: { id: target.id }, data: { isActive: false } });
+  await audit(actor.id, "USER_DEACTIVATED", "User", target.id);
+  await notify(target.id, "Your account has been deactivated. Contact the OJT Coordinator if you believe this is an error.");
+  revalidateWorkspaces("/coordinator/users");
+}
+
+export async function addSkillAction(form: FormData) {
+  const actor = await requireRole("COORDINATOR");
+  const input = z.object({ name: z.string().trim().min(2).max(100), category: z.string().trim().max(100) }).safeParse({ name: form.get("name"), category: form.get("category") });
+  if (!input.success) return;
+  try {
+    const skill = await db.skill.create({ data: { name: input.data.name, category: input.data.category || null } });
+    await audit(actor.id, "SKILL_CREATED", "Skill", skill.id);
+    revalidateWorkspaces("/coordinator/skills");
+  } catch { return; }
+}
+
+export async function removeSkillAction(form: FormData) {
+  const actor = await requireRole("COORDINATOR");
+  const input = z.object({ skillId: idSchema, confirm: z.literal("yes") }).safeParse({ skillId: form.get("skillId"), confirm: form.get("confirm") });
+  if (!input.success) return;
+  const skill = await db.skill.findUnique({ where: { id: input.data.skillId }, select: { id: true, name: true } });
+  if (!skill) return;
+  await db.skill.delete({ where: { id: skill.id } });
+  await audit(actor.id, "SKILL_REMOVED", "Skill", skill.id, skill.name);
+  revalidateWorkspaces("/coordinator/skills");
 }
 
 export async function reviewDocumentAction(form: FormData) {
