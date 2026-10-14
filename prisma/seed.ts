@@ -19,7 +19,7 @@ async function main() {
   const demoEmails = ["demo.coordinator@connected.test","demo.cocoordinator@connected.test","demo.student@connected.test","demo.company@connected.test","demo.attorney@connected.test"];
   const roles: Role[] = ["COORDINATOR","CO_COORDINATOR","STUDENT","COMPANY","ATTORNEY"];
   const demoUsers = [];
-  for (let i = 0; i < demoEmails.length; i++) demoUsers.push(await db.user.upsert({ where: { email: demoEmails[i] }, update: { name: `Demo ${roles[i].replaceAll("_", " ")}`, role: roles[i], isActive: true }, create: { email: demoEmails[i], name: `Demo ${roles[i].replaceAll("_", " ")}`, passwordHash: demoHash, role: roles[i], mustChangePassword: true } }));
+  for (let i = 0; i < demoEmails.length; i++) demoUsers.push(await db.user.upsert({ where: { email: demoEmails[i] }, update: { name: `Demo ${roles[i].replaceAll("_", " ")}`, role: roles[i], isActive: true, passwordHash: demoHash, mustChangePassword: true }, create: { email: demoEmails[i], name: `Demo ${roles[i].replaceAll("_", " ")}`, passwordHash: demoHash, role: roles[i], mustChangePassword: true } }));
   const [coordinator, coCoordinator, studentUser, companyUser] = demoUsers;
   const studentData = [
     ["2020-00101","Ari Santos","APPROVED"],["2020-00102","Bea Cruz","APPROVED"],["2020-00103","Cal Reyes","PENDING"],["2020-00104","Dani Lim","APPROVED"],["2020-00105","Eli Ramos","APPROVED"]
@@ -27,8 +27,8 @@ async function main() {
   const students = [];
   for (let i=0;i<studentData.length;i++) {
     const [number,name,approval]=studentData[i];
-    const user=await db.user.upsert({ where:{email:`demo.student${i+1}@connected.test`}, update:{name,role:"STUDENT",isActive:true}, create:{email:`demo.student${i+1}@connected.test`,name,passwordHash:demoHash,role:"STUDENT"} });
-    const profile=await db.studentProfile.upsert({where:{studentNumber:number},update:{approval,assignedToId:i===0?coCoordinator.id:null},create:{userId:user.id,studentNumber:number,approval,assignedToId:i===0?coCoordinator.id:null,headline:"BSIT student seeking an OJT placement"}});
+    const user=i===0 ? studentUser : await db.user.upsert({ where:{email:`demo.student${i+1}@connected.test`}, update:{name,role:"STUDENT",isActive:true,passwordHash:demoHash,mustChangePassword:true}, create:{email:`demo.student${i+1}@connected.test`,name,passwordHash:demoHash,role:"STUDENT",mustChangePassword:true} });
+    const profile=await db.studentProfile.upsert({where:{studentNumber:number},update:{userId:user.id,approval,assignedToId:i===0?coCoordinator.id:null},create:{userId:user.id,studentNumber:number,approval,assignedToId:i===0?coCoordinator.id:null,headline:"BSIT student seeking an OJT placement"}});
     students.push(profile);
   }
   const companyData = [

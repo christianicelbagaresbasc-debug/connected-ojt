@@ -23,6 +23,11 @@ describe("workflow rules", () => {
     expect(canViewDocument("ATTORNEY", "law", doc)).toBe(true);
     expect(canViewDocument("COORDINATOR", "staff", doc)).toBe(true);
   });
+  it("limits co-coordinator document access to assigned students", () => {
+    const companyDocument = { kind: "SEC_REGISTRATION", legalStatus: "PENDING_REVIEW", uploadedById: "company-rep", companyId: "company" };
+    expect(canViewDocument("CO_COORDINATOR", "co-coordinator", companyDocument)).toBe(false);
+    expect(canViewDocument("CO_COORDINATOR", "co-coordinator", { ...companyDocument, assignedStudent: true })).toBe(true);
+  });
   it("allows coordinator verification state changes through the documented path", () => {
     expect(canTransitionVerification("PENDING", "UNDER_REVIEW")).toBe(true);
     expect(canTransitionVerification("PENDING", "VERIFIED")).toBe(false);

@@ -26,10 +26,10 @@ export type DocAccess = { id?: string; kind: string; legalStatus: string; upload
 export function canViewDocument(role: Role, userId: string, doc: DocAccess): boolean {
   if (role === "COORDINATOR") return true;
   if (doc.uploadedById === userId) return true;
-  if (role === "CO_COORDINATOR") return !!doc.assignedStudent || !!doc.companyId;
+  if (role === "CO_COORDINATOR") return !!doc.assignedStudent;
   if (role === "ATTORNEY") return doc.legalStatus !== "NOT_REQUIRED";
   const publishedMoa = doc.kind !== "MOA" || doc.legalStatus === "APPROVED";
-  if (role === "STUDENT") return (doc.studentOwnerId === userId || doc.studentId === userId) && publishedMoa;
+  if (role === "STUDENT") return doc.studentOwnerId === userId && publishedMoa;
   if (role === "COMPANY") {
     if (doc.ownCompany || doc.applicationCompanyId === doc.companyId) return publishedMoa;
     return !!doc.studentApplied && ["RESUME", "CERTIFICATION"].includes(doc.kind);
