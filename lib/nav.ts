@@ -1,0 +1,8 @@
+import type { Role } from "@/lib/workflow";
+export const nav: Record<Role, { label: string; href: string }[]> = {
+  COORDINATOR: [{ label: "Dashboard", href: "/coordinator" }, { label: "Students", href: "/coordinator/students" }, { label: "Companies", href: "/coordinator/companies" }, { label: "Opportunities", href: "/coordinator/opportunities" }, { label: "Applications", href: "/coordinator/applications" }, { label: "Placements", href: "/coordinator/placements" }, { label: "Users", href: "/coordinator/users" }, { label: "Skills", href: "/coordinator/skills" }, { label: "Reports", href: "/coordinator/reports" }, { label: "Audit log", href: "/coordinator/audit" }],
+  CO_COORDINATOR: [{ label: "Dashboard", href: "/co-coordinator" }, { label: "Students", href: "/co-coordinator/students" }, { label: "Applications", href: "/co-coordinator/applications" }, { label: "Placements", href: "/co-coordinator/placements" }, { label: "Companies", href: "/co-coordinator/companies" }],
+  STUDENT: [{ label: "Dashboard", href: "/student" }, { label: "My profile", href: "/student/profile" }, { label: "Opportunities", href: "/student/opportunities" }, { label: "Applications", href: "/student/applications" }, { label: "Companies", href: "/student/companies" }, { label: "Suggest a company", href: "/student/suggest-company" }, { label: "Placement", href: "/student/placement" }],
+  COMPANY: [{ label: "Dashboard", href: "/company" }, { label: "Company profile", href: "/company/profile" }, { label: "Opportunities", href: "/company/opportunities" }, { label: "Applicants", href: "/company/applicants" }, { label: "Placements", href: "/company/placements" }],
+  ATTORNEY: [{ label: "Review queue", href: "/attorney" }, { label: "Review history", href: "/attorney/history" }]
+};

@@ -1,0 +1,319 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  COORDINATOR
+  CO_COORDINATOR
+  STUDENT
+  COMPANY
+  ATTORNEY
+}
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+enum PartnerType {
+  EXISTING_PARTNER
+  NEW_COMPANY
+}
+enum VerificationStatus {
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+}
+enum WorkArrangement {
+  ON_SITE
+  REMOTE
+  HYBRID
+}
+enum OpportunityStatus {
+  OPEN
+  CLOSED
+}
+enum ApplicationStatus {
+  PENDING
+  UNDER_REVIEW
+  ACCEPTED
+  DECLINED
+  REJECTED
+  WITHDRAWN
+  PLACED
+}
+enum PlacementStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+enum LegalStatus {
+  NOT_REQUIRED
+  PENDING_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  REJECTED
+}
+enum DocumentKind {
+  MOA
+  SEC_REGISTRATION
+  DTI_REGISTRATION
+  BUSINESS_CERTIFICATE
+  INTERNSHIP_CONTRACT
+  COMPLETION_CERTIFICATE
+  ACCOMPLISHMENT_REPORT
+  WEEKLY_REPORT
+  RESUME
+  CERTIFICATION
+  OTHER
+}
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  name String
+  passwordHash String
+  role Role
+  isActive Boolean @default(true)
+  mustChangePassword Boolean @default(false)
+  companyId String?
+  company Company? @relation("CompanyReps", fields: [companyId], references: [id])
+  studentProfile StudentProfile? @relation("StudentUser")
+  assignedStudents StudentProfile[] @relation("Assignment")
+  notifications Notification[]
+  uploads Document[] @relation("Uploader")
+  reviews DocumentReview[]
+  auditLogs AuditLog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model StudentProfile {
+  id String @id @default(cuid())
+  userId String @unique
+  user User @relation("StudentUser", fields: [userId], references: [id], onDelete: Cascade)
+  studentNumber String @unique
+  course String @default("BSIT")
+  yearLevel Int?
+  section String?
+  headline String?
+  about String?
+  phone String?
+  location String?
+  portfolioUrl String?
+  approval ApprovalStatus @default(PENDING)
+  assignedToId String?
+  assignedTo User? @relation("Assignment", fields: [assignedToId], references: [id])
+  skills StudentSkill[]
+  educations Education[]
+  experiences Experience[]
+  projects Project[]
+  certifications Certification[]
+  applications Application[]
+  placements Placement[]
+  documents Document[]
+  suggestedCompanies Company[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Education {
+  id String @id @default(cuid())
+  studentId String
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  school String
+  degree String?
+  startYear Int?
+  endYear Int?
+  description String?
+}
+model Experience {
+  id String @id @default(cuid())
+  studentId String
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  title String
+  organization String
+  period String?
+  description String?
+}
+model Project {
+  id String @id @default(cuid())
+  studentId String
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  title String
+  url String?
+  description String?
+}
+model Certification {
+  id String @id @default(cuid())
+  studentId String
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name String
+  issuer String?
+  year Int?
+}
+
+model Skill {
+  id String @id @default(cuid())
+  name String @unique
+  category String?
+  students StudentSkill[]
+  opportunities OpportunitySkill[]
+}
+model StudentSkill {
+  studentId String
+  skillId String
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  @@id([studentId, skillId])
+}
+
+model Company {
+  id String @id @default(cuid())
+  name String
+  address String?
+  industry String?
+  description String?
+  website String?
+  contactPerson String?
+  contactEmail String?
+  contactPhone String?
+  partnerType PartnerType @default(NEW_COMPANY)
+  verification VerificationStatus @default(PENDING)
+  verificationNotes String?
+  verifiedAt DateTime?
+  suggestedById String?
+  suggestedBy StudentProfile? @relation(fields: [suggestedById], references: [id])
+  reps User[] @relation("CompanyReps")
+  opportunities Opportunity[]
+  documents Document[]
+  placements Placement[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Opportunity {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title String
+  description String
+  tasks String?
+  qualifications String?
+  slots Int @default(1)
+  location String?
+  workArrangement WorkArrangement @default(ON_SITE)
+  deadline DateTime?
+  status OpportunityStatus @default(OPEN)
+  skills OpportunitySkill[]
+  applications Application[]
+  placements Placement[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model OpportunitySkill {
+  opportunityId String
+  skillId String
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  @@id([opportunityId, skillId])
+}
+
+model Application {
+  id String @id @default(cuid())
+  studentId String
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  opportunityId String
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  status ApplicationStatus @default(PENDING)
+  coverNote String?
+  companyNote String?
+  coordinatorNote String?
+  studentConfirmed Boolean @default(false)
+  documents Document[]
+  placement Placement?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([studentId, opportunityId])
+}
+
+model Placement {
+  id String @id @default(cuid())
+  studentId String
+  student StudentProfile @relation(fields: [studentId], references: [id])
+  companyId String
+  company Company @relation(fields: [companyId], references: [id])
+  opportunityId String?
+  opportunity Opportunity? @relation(fields: [opportunityId], references: [id])
+  applicationId String? @unique
+  application Application? @relation(fields: [applicationId], references: [id])
+  status PlacementStatus @default(ACTIVE)
+  startDate DateTime?
+  endDate DateTime?
+  confirmedById String
+  overrideReason String?
+  documents Document[]
+  createdAt DateTime @default(now())
+}
+
+model Document {
+  id String @id @default(cuid())
+  kind DocumentKind
+  fileName String
+  mimeType String
+  size Int
+  data Bytes
+  note String?
+  uploadedById String
+  uploadedBy User @relation("Uploader", fields: [uploadedById], references: [id])
+  studentId String?
+  student StudentProfile? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  companyId String?
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  applicationId String?
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  placementId String?
+  placement Placement? @relation(fields: [placementId], references: [id], onDelete: Cascade)
+  legalStatus LegalStatus @default(NOT_REQUIRED)
+  reviews DocumentReview[]
+  createdAt DateTime @default(now())
+  @@index([legalStatus])
+  @@index([studentId])
+  @@index([companyId])
+}
+model DocumentReview {
+  id String @id @default(cuid())
+  documentId String
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  reviewerId String
+  reviewer User @relation(fields: [reviewerId], references: [id])
+  action LegalStatus
+  comment String?
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message String
+  href String?
+  read Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@index([userId, read])
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String?
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action String
+  entity String
+  entityId String?
+  detail String?
+  createdAt DateTime @default(now())
+}
